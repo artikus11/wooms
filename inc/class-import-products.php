@@ -14,6 +14,7 @@ class woomss_tool_products_import {
 	public function __construct() {
 		//do_action('wooms_product_import_row', $value, $key, $data);
 		add_action( 'wooms_product_import_row', [ $this, 'load_data' ], 10, 3 );
+		add_action( 'add_meta_boxes', array( $this, 'add_meta_boxes_post_type' ) );
 	}
 	
 	/**
@@ -25,10 +26,6 @@ class woomss_tool_products_import {
 	 */
 	public function load_data( $value, $key, $data ) {
 		
-		if ('variant' == $value['meta']['type']){
-			return;
-			
-		}
 		if ( ! empty( $value['archived'] ) ) {
 			return;
 		}
@@ -42,7 +39,7 @@ class woomss_tool_products_import {
 		if ( ! empty( $value['article'] ) ) {
 			$product_id = wc_get_product_id_by_sku( $value['article'] );
 		} else {
-			$product_id = '';
+			$product_id = null;
 		}
 		
 		if ( intval( $product_id ) ) {
@@ -51,7 +48,11 @@ class woomss_tool_products_import {
 			$this->update_product( $product_id, $value );
 		} else {
 			$product_id = $this->add_product( $value );
-			$this->update_product( $product_id, $value );
+			if ( $product_id ) {
+				$this->update_product( $product_id, $value );
+			} else {
+				return;
+			}
 		}
 		
 		do_action( 'wooms_product_update', $product_id, $value, $data );
@@ -66,9 +67,9 @@ class woomss_tool_products_import {
 	 *
 	 */
 	public function update_product( $product_id, $data_of_source ) {
-		/*if ( empty( get_option( 'woomss_variations_sync_enabled' ) ) ) {
-			wp_set_object_terms( $product_id, 'simple', 'product_type', false );
-		}*/
+		
+		wp_set_object_terms( $product_id, 'simple', 'product_type', false );
+		
 		$product = wc_get_product( $product_id );
 		
 		//save data of source
@@ -85,6 +86,8 @@ class woomss_tool_products_import {
 		
 		update_post_meta( $product_id, 'wooms_id', $data_of_source['id'] );
 		
+		update_post_meta( $product_id, 'wooms_updated', $data_of_source['updated']);
+		
 		//update title
 		if ( isset( $data_of_source['name'] ) and $data_of_source['name'] != $product->get_title() ) {
 			if ( ! empty( get_option( 'wooms_replace_title' ) ) ) {
@@ -92,11 +95,22 @@ class woomss_tool_products_import {
 			}
 		}
 		
+		$product_description = isset($data_of_source['description']) ? $data_of_source['description'] : '';
 		//update description
-		if ( isset( $data_of_source['description'] ) and empty( $product->get_description() ) ) {
-			$product->set_description( $data_of_source['description'] );
+		if ( apply_filters( 'wooms_added_description', true, $product_description) ) {
+
+			if ( $product_description && ! empty( get_option( 'wooms_replace_description' ) ) ) {
+				
+				$product->set_description( $product_description );
+				
+			} else {
+				
+				if ( empty( $product->get_description() ) ) {
+					
+					$product->set_description( $product_description);
+				}
+			}
 		}
-		
 		//Price Retail 'salePrices'
 		if ( isset( $data_of_source['salePrices'][0]['value'] ) ) {
 			$price_source = floatval( $data_of_source['salePrices'][0]['value'] );
@@ -106,14 +120,50 @@ class woomss_tool_products_import {
 			
 			$product->set_price( $price );
 			$product->set_regular_price( $price );
+			
+			if ( 0 == $product->get_price()){
+				$product->set_catalog_visibility('hidden' );
+			} else {
+				$product->set_catalog_visibility('visible');
+			}
 		}
 		
 		$product->set_stock_status( 'instock' );
 		$product->set_manage_stock( 'no' );
+
 		
 		$product->set_status( 'publish' );
 		$product->save();
 		
+	}
+	
+	/**
+	 * Add metaboxes
+	 */
+	public function add_meta_boxes_post_type() {
+		add_meta_box( 'metabox_product', 'МойСклад', array( $this, 'add_meta_box_data_product' ), 'product', 'side', 'low' );
+	}
+	
+	/**
+	 * Meta box in product
+	 */
+	public function add_meta_box_data_product() {
+		$post = get_post();
+		$box_data = '';
+		$data_id   = get_post_meta( $post->ID, 'wooms_id', true );
+		$data_meta = get_post_meta( $post->ID, 'wooms_meta', true );
+		$data_updated = get_post_meta( $post->ID, 'wooms_updated', true );
+		if ( $data_id ) {
+			$box_data = sprintf( '<div>ID товара в МойСклад: <div><strong>%s</strong></div></div>', $data_id );
+		}
+		if ( $data_meta ) {
+			$box_data .= sprintf( '<p><a href="%s" target="_blank">Посмотреть товар в МойСклад</a></p>', $data_meta['uuidHref'] );
+		}
+		if ( $data_updated ) {
+			$box_data .= sprintf( '<div>Дата последнего обновления товара в МойСклад: <div><strong>%s</strong></div></div>', $data_updated );
+		}
+		
+		echo $box_data;
 	}
 	
 	/**
@@ -165,6 +215,10 @@ class woomss_tool_products_import {
 		}
 		
 		update_post_meta( $post_id, $meta_key = 'wooms_id', $meta_value = $data_source['id'] );
+		
+		update_post_meta( $post_id, 'wooms_meta', $data_source['meta']);
+		
+		update_post_meta( $post_id, 'wooms_updated', $data_source['updated']);
 		
 		if ( isset( $data_source['article'] ) ) {
 			update_post_meta( $post_id, $meta_key = '_sku', $meta_value = $data_source['article'] );

@@ -27,7 +27,7 @@ class WooMS_Product_Import_Walker {
 	 */
 	public function add_schedule( $schedules ) {
 		$schedules['wooms_cron_walker_shedule'] = array(
-			'interval' => 60,
+			'interval' => apply_filters('wooms_cron_interval', 60),
 			'display'  => 'WooMS Cron Walker 60 sec',
 		);
 		
@@ -95,6 +95,7 @@ class WooMS_Product_Import_Walker {
 		if ( $this->check_stop_manual() ) {
 			return;
 		}
+		
 		$count = apply_filters( 'wooms_iteration_size', 20 );
 		if ( ! $offset = get_transient( 'wooms_offset' ) ) {
 			$offset = 0;
@@ -103,13 +104,13 @@ class WooMS_Product_Import_Walker {
 			delete_transient( 'wooms_count_stat' );
 		}
 		
-		$ms_api_args = apply_filters( 'wooms_product_ms_api_arg', array(
+		$ms_api_args = array(
 			'offset' => $offset,
 			'limit'  => $count,
-		) );
+		);
 		$ms_api_url  = apply_filters( 'wooms_product_ms_api_url', 'https://online.moysklad.ru/api/remap/1.1/entity/product/' );
 		$url_api     = add_query_arg( $ms_api_args, $ms_api_url );
-		// do_action("logger_u7", $url_api);
+		//do_action("logger_u7", $url_api);
 		try {
 			
 			delete_transient( 'wooms_end_timestamp' );
@@ -125,22 +126,30 @@ class WooMS_Product_Import_Walker {
 					throw new Exception( $error_code . ': ' . $data['errors'][0]["error"] );
 				}
 			}
+			
+			do_action( 'wooms_walker_start' );
 			//If no rows, that send 'end' and stop walker
 			if ( empty( $data['rows'] ) ) {
 				$this->walker_finish();
 				
+				do_action( 'wooms_walker_finish' );
+				
 				return true;
 			}
+			
 			$i = 0;
+			
 			foreach ( $data['rows'] as $key => $value ) {
 				do_action( 'wooms_product_import_row', $value, $key, $data );
 				$i ++;
 			}
+			
 			if ( $count_saved = get_transient( 'wooms_count_stat' ) ) {
 				set_transient( 'wooms_count_stat', $i + $count_saved );
 			} else {
 				set_transient( 'wooms_count_stat', $i );
 			}
+			
 			set_transient( 'wooms_offset', $offset + $i );
 			
 			return;
@@ -178,6 +187,7 @@ class WooMS_Product_Import_Walker {
 		} else {
 			$timer = 60 * 60 * intval( get_option( 'woomss_walker_cron_timer', 24 ) );
 		}
+		
 		set_transient( 'wooms_end_timestamp', date( "Y-m-d H:i:s" ), $timer );
 		
 		return true;
@@ -244,13 +254,17 @@ class WooMS_Product_Import_Walker {
 		if ( $screen->base != 'tools_page_moysklad' ) {
 			return;
 		}
+		
 		if ( empty( get_transient( 'wooms_end_timestamp' ) ) ) {
 			return;
 		}
+		
 		if ( ! empty( get_transient( 'wooms_start_timestamp' ) ) ) {
 			return;
 		}
+		
 		do_action( 'wooms_notice_result' );
+		
 		?>
 		<div class="wrap">
 			<div id="message" class="notice notice-success is-dismissible">
@@ -272,9 +286,11 @@ class WooMS_Product_Import_Walker {
 		if ( $screen->base != 'tools_page_moysklad' ) {
 			return;
 		}
+		
 		if ( empty( get_transient( 'wooms_error_background' ) ) ) {
 			return;
 		}
+		
 		?>
 		<div class="wrap">
 			<div class="notice notice-error is-dismissible">
